@@ -1,8 +1,8 @@
-# usage
+# usage ⚡
 
-Print remaining Codex and xAI SuperGrok subscription quota for accounts you explicitly log in.
+See remaining **Codex** and **xAI** subscription quota — multi-account, one static print.
 
-This is not a session-log cost scanner. It does not read `~/.codex`, Pi, or `~/.grok` auth unless you pass `--import --auth-file`.
+No session scanning. No watch loop. Login explicitly, run `usage`, done.
 
 ## Install
 
@@ -10,45 +10,24 @@ This is not a session-log cost scanner. It does not read `~/.codex`, Pi, or `~/.
 cargo install --git https://github.com/ajay-bhargava/usage-graph --locked
 ```
 
-From a checkout:
+## Quick start
 
 ```bash
-cargo install --path . --locked
-```
-
-## Commands
-
-```bash
-# Device-code login (required before any report)
 usage login --provider codex --name work
 usage login --provider xai --name grok
-
-# Import from an explicit auth file
-usage login --provider codex --name personal --import --auth-file /path/to/auth.json
-usage login --provider xai --name grok --import --auth-file ~/.grok/auth.json
-
-usage list
-usage logout work
-
-# Remaining quota for every logged-in account
 usage
-usage --json
-usage --account work
-usage --offline
 ```
 
-xAI import accepts Grok CLI `auth.json` (OIDC `key` entries) or Pi `xai` OAuth. API keys are rejected.
-
-## Sample
+## Output
 
 ```text
 Subscription Remaining
 
 work  (codex, pro)
-+--------------------------------------------------+
-| 5h     [############--------]  58% left, 3d 2h   |
-| Weekly [##################--]  91% left, 45s     |
-+--------------------------------------------------+
++------------------------------------------------+
+| 5h     [############--------]  58% left, 3d 2h |
+| Weekly [##################--]  91% left, 45s   |
++------------------------------------------------+
 
 grok  (xai, SuperGrok)
 +------------------------------------------------+
@@ -56,20 +35,31 @@ grok  (xai, SuperGrok)
 +------------------------------------------------+
 ```
 
-`--json` emits `accounts[].windows[]` with `used_percent`, `left_percent`, and `reset_in`. Per-account fetch failures become `error` instead of aborting the run.
+UTF-8 terminals get box-drawing + `█`/`░` bars. Piped output stays ASCII.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `usage` | Print remaining quota for every account |
+| `usage --json` | Same data as JSON |
+| `usage --account work` | One account only |
+| `usage login --provider codex --name work` | Codex device login |
+| `usage login --provider xai --name grok` | xAI device login |
+| `usage login … --import --auth-file PATH` | Import Codex / Pi / Grok auth |
+| `usage list` | List names (no secrets) |
+| `usage logout work` | Remove an account |
 
 ## Storage
 
-Credentials live in:
-
 ```text
-${XDG_CONFIG_HOME:-~/.config}/usage-cli/accounts.json
+~/.config/usage-cli/accounts.json   # 0600
 ```
 
-The directory is `0700` and the file is `0600`. Override the path with `--store`. Tokens are never written back to Codex CLI, Pi, or Grok.
+Never auto-imports. Never writes back to `~/.codex`, Pi, or `~/.grok`.
 
 ## Notes
 
-Codex quota comes from the unofficial ChatGPT `wham/usage` endpoint. Spark windows are shown when the payload includes them.
-
-xAI quota comes from the unofficial Grok CLI proxy `billing?format=credits` endpoint. The row is labeled Weekly, Monthly, or Credits from the reported period length. OpenAI and xAI API keys cannot read these subscription windows.
+- Codex → ChatGPT `wham/usage` (incl. Spark when present)
+- xAI → Grok CLI proxy credits (`Weekly` / `Monthly` / `Credits`)
+- API keys are not subscription auth — they won't work here

@@ -8,7 +8,7 @@
 #![deny(clippy::missing_asserts_for_indexing)]
 #![deny(clippy::unwrap_used)]
 
-//! Static remaining-usage reports for explicitly logged-in Codex accounts.
+//! Static remaining-usage reports for explicitly logged-in Codex and xAI accounts.
 
 mod cli;
 mod login;
@@ -17,6 +17,7 @@ mod quota;
 mod render;
 mod report;
 mod store;
+mod xai;
 
 use clap::Parser;
 use cli::{Cli, Command};
@@ -29,6 +30,7 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
 use store::{StoredAccount, default_store_path, load_store, save_store};
+use xai::{LiveXaiOAuth, LiveXaiUsageTransport};
 
 /// Execute the CLI with process arguments.
 ///
@@ -68,6 +70,7 @@ fn execute(cli: Cli) -> Result<()> {
             import,
             auth_file.as_deref(),
             &LiveCodexOAuth,
+            &LiveXaiOAuth,
         ),
         Some(Command::List) => list_accounts(&store_path, cli.json),
         Some(Command::Logout { name }) => logout_account(&store_path, &name),
@@ -77,7 +80,9 @@ fn execute(cli: Cli) -> Result<()> {
             cli.json,
             cli.offline,
             &LiveCodexOAuth,
+            &LiveXaiOAuth,
             &LiveCodexUsageTransport,
+            &LiveXaiUsageTransport,
         ),
     }
 }
@@ -96,7 +101,9 @@ fn list_accounts(store_path: &Path, json: bool) -> Result<()> {
     }
 
     if store.accounts.is_empty() {
-        println!("No accounts. Run `usage login --provider codex --name <name>` to add one.");
+        println!(
+            "No accounts. Run `usage login --provider codex --name <name>` or `--provider xai` to add one."
+        );
         return Ok(());
     }
 

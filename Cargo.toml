@@ -3,7 +3,7 @@ name = "usage-cli"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Static multi-account remaining-usage reports for Codex subscriptions"
+description = "Static multi-account remaining-usage reports for Codex and xAI subscriptions"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/ajay-bhargava/usage-graph"
@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 base64 = "0.22.1"
+chrono = { version = "0.4.44", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.6.1", features = ["derive"] }
 color-eyre = "0.6.5"
 dirs = "6.0.0"

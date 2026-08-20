@@ -9,7 +9,7 @@ use std::path::PathBuf;
 #[command(
     name = "usage",
     version,
-    about = "Print remaining Codex subscription usage for logged-in accounts"
+    about = "Print remaining Codex and xAI subscription usage for logged-in accounts"
 )]
 pub(crate) struct Cli {
     /// Emit structured JSON instead of tables.
@@ -62,7 +62,7 @@ pub(crate) enum Command {
 pub(crate) enum Provider {
     /// Codex subscription via `ChatGPT` OAuth.
     Codex,
-    /// xAI Grok subscription. Login is not implemented yet.
+    /// xAI Grok subscription.
     Xai,
 }
 

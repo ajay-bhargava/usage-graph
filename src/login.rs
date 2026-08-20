@@ -6,6 +6,10 @@ use crate::oauth::{
     account_id_from_access_token,
 };
 use crate::store::{StoredAccount, insert_account, load_store, save_store};
+use crate::xai::{
+    XaiDevicePoll, XaiOAuth, imported_xai_account_from_json,
+    stored_from_tokens as stored_xai_from_tokens,
+};
 use eyre::{Result, WrapErr, eyre};
 use serde::Deserialize;
 use std::io::{self, Write};
@@ -24,19 +28,24 @@ pub(crate) fn login_account(
     import: bool,
     auth_file: Option<&Path>,
     oauth: &impl CodexOAuth,
+    xai: &impl XaiOAuth,
 ) -> Result<()> {
     match provider {
-        Provider::Xai => Err(eyre!(
-            "xAI login is not implemented yet; Codex accounts are supported in this release"
-        )),
         Provider::Codex if import => {
             let auth_file = auth_file.ok_or_else(|| eyre!("--import requires --auth-file PATH"))?;
-            let account = import_codex_account(name, auth_file)?;
-            persist_new_account(store_path, account)
+            persist_new_account(store_path, import_codex_account(name, auth_file)?)
         }
         Provider::Codex => {
             let tokens = device_login(oauth, &mut io::stderr())?;
             persist_new_account(store_path, stored_from_tokens(name, tokens))
+        }
+        Provider::Xai if import => {
+            let auth_file = auth_file.ok_or_else(|| eyre!("--import requires --auth-file PATH"))?;
+            persist_new_account(store_path, import_xai_account(name, auth_file)?)
+        }
+        Provider::Xai => {
+            let tokens = xai_device_login(xai, &mut io::stderr())?;
+            persist_new_account(store_path, stored_xai_from_tokens(name, tokens))
         }
     }
 }
@@ -72,12 +81,46 @@ fn device_login(oauth: &impl CodexOAuth, err: &mut impl Write) -> Result<OAuthTo
     }
 }
 
+/// Run xAI device-code login using `oauth`.
+fn xai_device_login(oauth: &impl XaiOAuth, err: &mut impl Write) -> Result<OAuthTokenSet> {
+    let session = oauth.start_device_auth()?;
+    writeln!(
+        err,
+        "Visit {} and enter code {}",
+        session.verification_uri, session.user_code
+    )?;
+    writeln!(err, "Waiting for authorization...")?;
+    let deadline = Instant::now() + session.expires_in;
+    let mut interval = session.interval;
+    loop {
+        if Instant::now() >= deadline {
+            return Err(eyre!("xAI device login timed out"));
+        }
+        thread::sleep(interval);
+        match oauth.poll_device_auth(&session)? {
+            XaiDevicePoll::Pending => {}
+            XaiDevicePoll::SlowDown => {
+                interval = interval.saturating_mul(2).min(Duration::from_secs(15));
+            }
+            XaiDevicePoll::Complete(tokens) => return Ok(tokens),
+        }
+    }
+}
+
 /// Import Codex tokens from a Codex CLI or Pi auth file.
 fn import_codex_account(name: &str, auth_file: &Path) -> Result<StoredAccount> {
     let raw = std::fs::read_to_string(auth_file)
         .wrap_err_with(|| format!("failed to read {}", auth_file.display()))?;
     imported_account_from_json(name, &raw)
         .wrap_err_with(|| format!("failed to import Codex auth from {}", auth_file.display()))
+}
+
+/// Import xAI tokens from a Grok CLI or Pi auth file.
+fn import_xai_account(name: &str, auth_file: &Path) -> Result<StoredAccount> {
+    let raw = std::fs::read_to_string(auth_file)
+        .wrap_err_with(|| format!("failed to read {}", auth_file.display()))?;
+    imported_xai_account_from_json(name, &raw)
+        .wrap_err_with(|| format!("failed to import xAI auth from {}", auth_file.display()))
 }
 
 /// Parse Codex CLI `auth.json` or Pi `openai-codex` credentials.
@@ -216,6 +259,7 @@ mod tests {
     use crate::cli::Provider;
     use crate::oauth::{CodexOAuth, DeviceAuthSession, DevicePoll, OAuthTokenSet};
     use crate::store::load_store;
+    use crate::xai::{XaiDevicePoll, XaiDeviceSession, XaiOAuth};
     use eyre::{Result, eyre};
     use std::time::Duration;
     use tempfile::TempDir;
@@ -251,6 +295,33 @@ mod tests {
                 expires: 1_234,
                 account_id: Some("acct".to_string()),
             })
+        }
+
+        fn refresh_access_token(&self, _refresh_token: &str) -> Result<OAuthTokenSet> {
+            Err(eyre!("refresh unused"))
+        }
+    }
+
+    struct CompleteXaiOAuth;
+
+    impl XaiOAuth for CompleteXaiOAuth {
+        fn start_device_auth(&self) -> Result<XaiDeviceSession> {
+            Ok(XaiDeviceSession {
+                device_code: "device".to_string(),
+                user_code: "CODE".to_string(),
+                verification_uri: "https://auth.x.ai/device".to_string(),
+                interval: Duration::from_millis(1),
+                expires_in: Duration::from_secs(60),
+            })
+        }
+
+        fn poll_device_auth(&self, _session: &XaiDeviceSession) -> Result<XaiDevicePoll> {
+            Ok(XaiDevicePoll::Complete(OAuthTokenSet {
+                access: "xai-access".to_string(),
+                refresh: "xai-refresh".to_string(),
+                expires: 1_234,
+                account_id: None,
+            }))
         }
 
         fn refresh_access_token(&self, _refresh_token: &str) -> Result<OAuthTokenSet> {
@@ -310,6 +381,7 @@ mod tests {
             true,
             Some(&auth_path),
             &CompleteOAuth,
+            &CompleteXaiOAuth,
         )
         .expect("login");
         let store = load_store(&store_path).expect("load");
@@ -328,6 +400,7 @@ mod tests {
             false,
             None,
             &CompleteOAuth,
+            &CompleteXaiOAuth,
         )
         .expect("login");
         let store = load_store(&store_path).expect("load");
@@ -337,17 +410,47 @@ mod tests {
     }
 
     #[test]
-    fn xai_login_is_rejected() {
+    fn xai_device_login_persists_tokens() {
         let temp = TempDir::new().expect("tempdir");
-        let error = login_account(
-            &temp.path().join("accounts.json"),
+        let store_path = temp.path().join("accounts.json");
+        login_account(
+            &store_path,
             Provider::Xai,
             "grok",
             false,
             None,
             &CompleteOAuth,
+            &CompleteXaiOAuth,
         )
-        .expect_err("xai");
-        assert!(error.to_string().contains("not implemented"), "{error}");
+        .expect("login");
+        let store = load_store(&store_path).expect("load");
+        assert_eq!(store.accounts.len(), 1, "one xAI account");
+        assert_eq!(store.accounts[0].provider, Provider::Xai);
+        assert_eq!(store.accounts[0].access, "xai-access");
+    }
+
+    #[test]
+    fn xai_import_persists_named_account() {
+        let temp = TempDir::new().expect("tempdir");
+        let store_path = temp.path().join("accounts.json");
+        let auth_path = temp.path().join("auth.json");
+        std::fs::write(
+            &auth_path,
+            r#"{"xai":{"type":"oauth","access":"pi-xai","refresh":"r"}}"#,
+        )
+        .expect("write auth");
+        login_account(
+            &store_path,
+            Provider::Xai,
+            "grok",
+            true,
+            Some(&auth_path),
+            &CompleteOAuth,
+            &CompleteXaiOAuth,
+        )
+        .expect("login");
+        let store = load_store(&store_path).expect("load");
+        assert_eq!(store.accounts.len(), 1, "one imported xAI account");
+        assert_eq!(store.accounts[0].access, "pi-xai");
     }
 }

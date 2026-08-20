@@ -102,8 +102,6 @@ pub(crate) struct QuotaWindow {
 pub(crate) enum QuotaError {
     /// Fetching is disabled by `--offline`.
     Offline,
-    /// Provider is not implemented yet.
-    UnsupportedProvider,
     /// The backend request failed before a usable response was received.
     RequestFailed,
     /// The backend rejected the current access token.
@@ -119,7 +117,6 @@ impl QuotaError {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Offline => "offline",
-            Self::UnsupportedProvider => "unsupported provider",
             Self::RequestFailed => "request failed",
             Self::Unauthorized => "unauthorized",
             Self::InvalidResponse => "invalid response",

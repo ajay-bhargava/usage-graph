@@ -22,7 +22,7 @@ mod xai;
 use clap::Parser;
 use cli::{Cli, Command};
 use eyre::{Result, WrapErr, eyre};
-use login::login_account;
+use login::{login_account, reauth_account};
 use oauth::LiveCodexOAuth;
 use quota::LiveCodexUsageTransport;
 use report::print_usage_report;
@@ -63,15 +63,21 @@ fn execute(cli: Cli) -> Result<()> {
             name,
             import,
             auth_file,
+            replace,
         }) => login_account(
             &store_path,
             provider,
             &name,
             import,
             auth_file.as_deref(),
+            replace,
+            cli.json,
             &LiveCodexOAuth,
             &LiveXaiOAuth,
         ),
+        Some(Command::Reauth { name }) => {
+            reauth_account(&store_path, &name, cli.json, &LiveCodexOAuth, &LiveXaiOAuth)
+        }
         Some(Command::List) => list_accounts(&store_path, cli.json),
         Some(Command::Logout { name }) => logout_account(&store_path, &name),
         None => print_usage_report(
@@ -107,13 +113,14 @@ fn list_accounts(store_path: &Path, json: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!("NAME             PROVIDER ACCOUNT");
+    println!("NAME             PROVIDER LOGIN");
     for account in &store.accounts {
         println!(
             "{:<16} {:<8} {}",
             account.name,
             account.provider.as_str(),
-            account.account_id.as_deref().unwrap_or("-")
+            oauth::login_label_from_access_token(&account.access)
+                .unwrap_or_else(|| "-".to_string())
         );
     }
     Ok(())

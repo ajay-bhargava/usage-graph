@@ -1,0 +1,30 @@
+{
+  "name": "usage-graph",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Companion Pi extensions for the usage CLI: Codex account switching and quota status.",
+  "license": "MIT",
+  "keywords": ["pi-package"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ajay-bhargava/usage-graph.git"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/pi-codex-accounts/src/index.ts",
+      "./extensions/pi-codex-usage/index.ts"
+    ]
+  },
+  "engines": { "node": ">=22.19.0" },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.80.6",
+    "@earendil-works/pi-tui": ">=0.80.6"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  },
+  "scripts": {
+    "test": "vitest run extensions/pi-codex-accounts/test"
+  }
+}

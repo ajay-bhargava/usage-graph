@@ -74,6 +74,8 @@ pub(crate) struct AccountQuota {
     pub(crate) name: String,
     /// Provider identifier.
     pub(crate) provider: Provider,
+    /// Login identity from the access token, such as an email or `team`.
+    pub(crate) login: Option<String>,
     /// Optional plan name from the usage payload.
     pub(crate) plan: Option<String>,
     /// Displayable quota windows.

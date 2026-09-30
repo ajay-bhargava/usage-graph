@@ -21,7 +21,7 @@ pub(crate) const DEVICE_VERIFICATION_URI: &str = "https://auth.openai.com/codex/
 /// Redirect URI attached to the device-code token exchange.
 const DEVICE_REDIRECT_URI: &str = "https://auth.openai.com/deviceauth/callback";
 /// Maximum time to wait for the user to complete device login.
-pub(crate) const DEVICE_CODE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+pub(crate) const DEVICE_CODE_TIMEOUT: Duration = Duration::from_secs(45 * 60);
 /// Refresh slightly before the reported expiry.
 const REFRESH_SKEW_MS: i64 = 5 * 60 * 1000;
 /// Claim path used by Codex access tokens.
@@ -310,6 +310,30 @@ pub(crate) fn account_id_from_access_token(access_token: &str) -> Option<String>
         .filter(|value| !value.is_empty())
 }
 
+/// Login identity stored in an access token, without secrets.
+///
+/// Codex tokens contribute the profile email. xAI tokens contribute `team` or
+/// `user` from `principal_type`.
+#[must_use]
+pub(crate) fn login_label_from_access_token(access_token: &str) -> Option<String> {
+    let payload = decode_jwt_payload(access_token)?;
+    if let Some(email) = payload
+        .get("https://api.openai.com/profile")
+        .and_then(|claim| claim.get("email"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Some(email.to_string());
+    }
+    payload
+        .get("principal_type")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_lowercase)
+}
+
 /// Decode a JWT payload without verifying the signature.
 fn decode_jwt_payload(token: &str) -> Option<serde_json::Value> {
     let payload = token.split('.').nth(1)?;
@@ -336,7 +360,7 @@ pub(crate) fn access_token_needs_refresh(account: &StoredAccount, now_ms: i64) -
 mod tests {
     use super::{
         DeviceStartPayload, TokenPayload, access_token_needs_refresh, account_id_from_access_token,
-        token_set_from_payload,
+        login_label_from_access_token, token_set_from_payload,
     };
     use crate::cli::Provider;
     use crate::store::StoredAccount;
@@ -380,6 +404,23 @@ mod tests {
             Some("acct-42")
         );
         assert!(tokens.expires < 1_000_000 + 3_600_000, "skew applied");
+    }
+
+    #[test]
+    fn login_label_reads_codex_email_and_xai_principal() {
+        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"{\"alg\":\"none\"}");
+        let codex = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(br#"{"https://api.openai.com/profile":{"email":"a@b.co"}}"#);
+        let xai = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(br#"{"principal_type":"Team"}"#);
+        assert_eq!(
+            login_label_from_access_token(&format!("{header}.{codex}.sig")).as_deref(),
+            Some("a@b.co")
+        );
+        assert_eq!(
+            login_label_from_access_token(&format!("{header}.{xai}.sig")).as_deref(),
+            Some("team")
+        );
     }
 
     #[test]

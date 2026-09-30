@@ -1,0 +1,60 @@
+{
+  "name": "@llblab/pi-codex-usage",
+  "version": "0.10.1",
+  "private": false,
+  "description": "Minimal Pi extension that shows primary Codex ChatGPT subscription usage limits",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "codex",
+    "usage",
+    "status"
+  ],
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/llblab/pi-codex-usage.git"
+  },
+  "homepage": "https://github.com/llblab/pi-codex-usage",
+  "bugs": {
+    "url": "https://github.com/llblab/pi-codex-usage/issues"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "check": "node --experimental-strip-types -e \"await import('./index.ts'); console.log('pi-codex-usage: extension import ok')\"",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "audit": "npm audit --omit=peer",
+    "pack:dry": "npm pack --dry-run",
+    "validate": "npm run typecheck && npm run test && npm run check && npm run audit && npm run pack:dry"
+  },
+  "files": [
+    "index.ts",
+    "README.md",
+    "AGENTS.md",
+    "BACKLOG.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "banner.jpg"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "image": "https://github.com/llblab/pi-codex-usage/raw/main/banner.jpg"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@sinclair/typebox": "*"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "typescript": "latest"
+  }
+}

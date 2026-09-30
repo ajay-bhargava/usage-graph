@@ -427,12 +427,11 @@ pub(crate) fn quota_from_billing_payload(
         config.subscription_tier.as_deref(),
         payload.subscription_tier.as_deref(),
     ]);
-    let label = window_label(window_minutes);
     Ok((
         plan,
         vec![QuotaWindow {
             bucket: "xai".to_string(),
-            label,
+            label: window_label(window_minutes),
             used_percent,
             window_minutes,
             resets_at_epoch_seconds: resets_at,

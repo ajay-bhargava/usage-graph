@@ -46,6 +46,14 @@ pub(crate) enum Command {
         /// Auth file to import. Required with `--import`.
         #[arg(long, value_name = "PATH", requires = "import")]
         auth_file: Option<PathBuf>,
+        /// Overwrite an existing account with the same name.
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Repeat device login for an existing named account.
+    Reauth {
+        /// Local account name to replace.
+        name: String,
     },
     /// List stored accounts without secrets.
     List,
@@ -93,11 +101,26 @@ mod tests {
     fn login_requires_provider_and_name() {
         let cli = Cli::parse_from(["usage", "login", "--provider", "codex", "--name", "work"]);
         match cli.command {
-            Some(super::Command::Login { name, import, .. }) => {
+            Some(super::Command::Login {
+                name,
+                import,
+                replace,
+                ..
+            }) => {
                 assert_eq!(name, "work");
                 assert!(!import, "login is device-code unless --import");
+                assert!(!replace, "replace defaults to false");
             }
             other => panic!("expected login command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reauth_takes_an_existing_account_name() {
+        let cli = Cli::parse_from(["usage", "reauth", "amp"]);
+        match cli.command {
+            Some(super::Command::Reauth { name }) => assert_eq!(name, "amp"),
+            other => panic!("expected reauth command, got {other:?}"),
         }
     }
 }

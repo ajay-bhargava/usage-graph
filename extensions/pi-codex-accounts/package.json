@@ -1,0 +1,45 @@
+{
+  "name": "@pi-kaush/pi-codex-accounts",
+  "version": "0.1.0",
+  "description": "Auto-rotate and pin named Codex subscription accounts in Pi using the usage CLI.",
+  "license": "MIT",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "types": "./src/index.ts",
+  "files": [
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md",
+    "src"
+  ],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "codex",
+    "usage"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.80.6",
+    "@earendil-works/pi-tui": ">=0.80.6"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "package:check": "node ./scripts/check-package.mjs"
+  },
+  "sideEffects": true
+}

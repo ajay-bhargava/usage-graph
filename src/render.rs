@@ -32,6 +32,9 @@ pub(crate) struct AccountQuotaJson {
     pub(crate) name: String,
     /// Provider identifier.
     pub(crate) provider: String,
+    /// Login identity from the access token, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) login: Option<String>,
     /// Optional plan name.
     pub(crate) plan: Option<String>,
     /// Displayable windows.
@@ -75,12 +78,22 @@ pub(crate) fn render_report(
 
 /// Render one account block.
 fn render_account(account: &AccountQuota, borders: BorderStyle, now_epoch_seconds: i64) -> String {
-    let title = match &account.plan {
-        Some(plan) => format!("{}  ({}, {plan})", account.name, account.provider.as_str()),
-        None => format!("{}  ({})", account.name, account.provider.as_str()),
-    };
+    let title = account_title(account);
     let rows = account_rows(account, borders, now_epoch_seconds);
     format!("{title}\n{}", render_table(&rows, borders))
+}
+
+/// Title line: local alias, provider, login identity, and plan.
+fn account_title(account: &AccountQuota) -> String {
+    let mut title = format!("{}  ({}", account.name, account.provider.as_str());
+    if let Some(login) = &account.login {
+        let _ = write!(title, ", {login}");
+    }
+    if let Some(plan) = &account.plan {
+        let _ = write!(title, ", {plan}");
+    }
+    title.push(')');
+    title
 }
 
 /// Build table rows for one account.
@@ -218,6 +231,7 @@ pub(crate) fn report_json(accounts: &[AccountQuota], now_epoch_seconds: i64) -> 
             .map(|account| AccountQuotaJson {
                 name: account.name.clone(),
                 provider: account.provider.as_str().to_string(),
+                login: account.login.clone(),
                 plan: account.plan.clone(),
                 windows: account
                     .windows
@@ -310,6 +324,7 @@ mod tests {
                 AccountQuota {
                     name: "work".to_string(),
                     provider: Provider::Codex,
+                    login: Some("a@b.co".to_string()),
                     plan: Some("pro".to_string()),
                     windows: vec![
                         QuotaWindow {
@@ -332,6 +347,7 @@ mod tests {
                 AccountQuota {
                     name: "broken".to_string(),
                     provider: Provider::Codex,
+                    login: None,
                     plan: None,
                     windows: Vec::new(),
                     error: Some(QuotaError::Unauthorized),
@@ -341,7 +357,7 @@ mod tests {
             100,
         );
         assert!(rendered.contains("Subscription Remaining"));
-        assert!(rendered.contains("work  (codex, pro)"));
+        assert!(rendered.contains("work  (codex, a@b.co, pro)"));
         assert!(rendered.contains("5h     [############--------]  58% left, 3d 2h"));
         assert!(rendered.contains("Weekly [##################--]  91% left, 45s"));
         assert!(rendered.contains("unavailable (unauthorized)"));

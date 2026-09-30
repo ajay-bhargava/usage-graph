@@ -138,9 +138,27 @@ pub(crate) fn insert_account(store: &mut AccountStore, account: StoredAccount) -
         .any(|existing| existing.name == account.name)
     {
         return Err(eyre!(
-            "account {} already exists; logout first or choose another name",
+            "account {} already exists; logout first, pass --replace, or run `usage reauth {}`",
+            account.name,
             account.name
         ));
+    }
+    store.accounts.push(account);
+    Ok(())
+}
+
+/// Insert a named account, or replace the existing account with the same name.
+///
+/// Returns an error when `name` is empty.
+pub(crate) fn upsert_account(store: &mut AccountStore, account: StoredAccount) -> Result<()> {
+    validate_account_name(&account.name)?;
+    if let Some(existing) = store
+        .accounts
+        .iter_mut()
+        .find(|existing| existing.name == account.name)
+    {
+        *existing = account;
+        return Ok(());
     }
     store.accounts.push(account);
     Ok(())
@@ -215,6 +233,12 @@ mod tests {
 
         let duplicate = insert_account(&mut store, sample_account("work"));
         assert!(duplicate.is_err(), "duplicate names must be rejected");
+
+        let mut replacement = sample_account("work");
+        replacement.access = "rotated".to_string();
+        crate::store::upsert_account(&mut store, replacement).expect("upsert");
+        assert_eq!(store.accounts.len(), 1, "upsert replaces in place");
+        assert_eq!(store.accounts[0].access, "rotated");
     }
 
     #[cfg(unix)]

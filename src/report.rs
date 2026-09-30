@@ -187,6 +187,7 @@ fn available(
     AccountQuota {
         name: account.name.clone(),
         provider: account.provider,
+        login: crate::oauth::login_label_from_access_token(&account.access),
         plan,
         windows,
         error: None,
@@ -198,6 +199,7 @@ fn unavailable(account: &StoredAccount, error: QuotaError) -> AccountQuota {
     AccountQuota {
         name: account.name.clone(),
         provider: account.provider,
+        login: crate::oauth::login_label_from_access_token(&account.access),
         plan: None,
         windows: Vec::new(),
         error: Some(error),

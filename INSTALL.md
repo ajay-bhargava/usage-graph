@@ -17,12 +17,14 @@ export PATH="$HOME/.local/bin:$PATH"
 pi install ~/pi-codex-bundle-macos-arm64
 usage login --provider codex --name personal
 usage login --provider codex --name work
+usage login --provider claude --name max   # optional, for the Claude bar
 ```
 
 Add `export PATH="$HOME/.local/bin:$PATH"` to `~/.zshrc` to persist it.
 Restart Pi from a shell with that PATH. Use `/codex-account` to choose an account,
 `/codex-account auto` for automatic selection, and `/codex-account status` to inspect it.
-The quota bar appears when using an OpenAI Codex subscription model.
+The Codex quota bar appears with OpenAI Codex subscription models; the Claude bar
+appears with `claude-code` / `anthropic` models.
 
 Pi loads the extensions directly from the extracted directory; do not delete or move it.
 Remove/disable separately installed copies of either extension before loading this bundle.

@@ -1,5 +1,8 @@
 //! Explicit account login and import.
 
+use crate::claude::{
+    ClaudeOAuth, imported_claude_account_from_json, stored_from_tokens as stored_claude_from_tokens,
+};
 use crate::cli::Provider;
 use crate::oauth::{
     CodexOAuth, DEVICE_CODE_TIMEOUT, DEVICE_VERIFICATION_URI, DevicePoll, OAuthTokenSet,
@@ -12,7 +15,7 @@ use crate::xai::{
 };
 use eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Serialize};
-use std::io::{self, Write};
+use std::io::{self, BufRead, Write};
 use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -27,6 +30,11 @@ enum LoginEvent {
         verification_uri: String,
         /// Short user code.
         user_code: String,
+    },
+    /// Browser URL for a copy-code login; the code is read from stdin.
+    AuthUrl {
+        /// Authorization URL.
+        url: String,
     },
     /// Tokens were stored for `name`.
     Complete {
@@ -56,6 +64,24 @@ impl LoginReporter {
             let mut err = io::stderr().lock();
             writeln!(err, "Visit {verification_uri} and enter code {user_code}")?;
             writeln!(err, "Waiting for authorization...")?;
+            Ok(())
+        }
+    }
+
+    /// Show a browser authorization URL and prompt for the pasted code.
+    fn auth_url(self, url: &str) -> Result<()> {
+        if self.json {
+            write_json_event(&LoginEvent::AuthUrl {
+                url: url.to_string(),
+            })
+        } else {
+            let mut err = io::stderr().lock();
+            writeln!(
+                err,
+                "Open this URL, sign in, and copy the code shown:\n\n{url}\n"
+            )?;
+            write!(err, "Paste code: ")?;
+            err.flush()?;
             Ok(())
         }
     }
@@ -102,6 +128,7 @@ pub(crate) fn login_account(
     json: bool,
     oauth: &impl CodexOAuth,
     xai: &impl XaiOAuth,
+    claude: &impl ClaudeOAuth,
 ) -> Result<()> {
     let reporter = LoginReporter { json };
     match provider {
@@ -141,7 +168,40 @@ pub(crate) fn login_account(
                 reporter,
             )
         }
+        Provider::Claude if import => {
+            let auth_file = auth_file.ok_or_else(|| eyre!("--import requires --auth-file PATH"))?;
+            let raw = std::fs::read_to_string(auth_file)
+                .wrap_err_with(|| format!("failed to read {}", auth_file.display()))?;
+            let account = imported_claude_account_from_json(name, &raw).wrap_err_with(|| {
+                format!("failed to import Claude auth from {}", auth_file.display())
+            })?;
+            persist_account(store_path, account, replace, reporter)
+        }
+        Provider::Claude => {
+            let tokens = claude_code_login(claude, reporter, &mut io::stdin().lock())?;
+            persist_account(
+                store_path,
+                stored_claude_from_tokens(name, tokens),
+                replace,
+                reporter,
+            )
+        }
     }
+}
+
+/// Run Claude browser copy-code login, reading the pasted code from `input`.
+fn claude_code_login(
+    oauth: &impl ClaudeOAuth,
+    reporter: LoginReporter,
+    input: &mut impl BufRead,
+) -> Result<OAuthTokenSet> {
+    let session = oauth.start_auth()?;
+    reporter.auth_url(&session.url)?;
+    let mut line = String::new();
+    input
+        .read_line(&mut line)
+        .wrap_err("failed to read Claude authorization code")?;
+    oauth.exchange_code(&session, &line)
 }
 
 /// Repeat device login for an existing named account.
@@ -153,6 +213,7 @@ pub(crate) fn reauth_account(
     json: bool,
     oauth: &impl CodexOAuth,
     xai: &impl XaiOAuth,
+    claude: &impl ClaudeOAuth,
 ) -> Result<()> {
     let store = load_store(store_path)?;
     let provider = store
@@ -164,7 +225,7 @@ pub(crate) fn reauth_account(
             eyre!("no account named {name}; run `usage login --provider <provider> --name {name}`")
         })?;
     login_account(
-        store_path, provider, name, false, None, true, json, oauth, xai,
+        store_path, provider, name, false, None, true, json, oauth, xai, claude,
     )
 }
 
@@ -373,6 +434,7 @@ fn persist_account(
 #[cfg(test)]
 mod tests {
     use super::{imported_account_from_json, login_account, reauth_account};
+    use crate::claude::{ClaudeAuthSession, ClaudeOAuth};
     use crate::cli::Provider;
     use crate::oauth::{CodexOAuth, DeviceAuthSession, DevicePoll, OAuthTokenSet};
     use crate::store::load_store;
@@ -475,6 +537,64 @@ mod tests {
         }
     }
 
+    struct FakeClaudeOAuth;
+
+    impl ClaudeOAuth for FakeClaudeOAuth {
+        fn start_auth(&self) -> Result<ClaudeAuthSession> {
+            Ok(ClaudeAuthSession {
+                url: "https://claude.ai/oauth/authorize?x".to_string(),
+                verifier: "state".to_string(),
+            })
+        }
+
+        fn exchange_code(
+            &self,
+            session: &ClaudeAuthSession,
+            pasted: &str,
+        ) -> Result<OAuthTokenSet> {
+            assert_eq!(session.verifier, "state");
+            assert_eq!(pasted.trim(), "code#state");
+            Ok(OAuthTokenSet {
+                access: "claude-access".to_string(),
+                refresh: "claude-refresh".to_string(),
+                expires: 1,
+                account_id: None,
+            })
+        }
+
+        fn refresh_access_token(&self, _refresh_token: &str) -> Result<OAuthTokenSet> {
+            Err(eyre!("refresh unused"))
+        }
+    }
+
+    #[test]
+    fn claude_code_login_exchanges_pasted_code() {
+        let mut input = std::io::Cursor::new(b"code#state\n".to_vec());
+        let tokens = super::claude_code_login(
+            &FakeClaudeOAuth,
+            super::LoginReporter { json: true },
+            &mut input,
+        )
+        .expect("login");
+        assert_eq!(tokens.access, "claude-access");
+    }
+
+    #[test]
+    fn claude_import_persists_named_account() {
+        let temp = TempDir::new().expect("tempdir");
+        let store_path = temp.path().join("accounts.json");
+        let auth_path = temp.path().join(".credentials.json");
+        std::fs::write(
+            &auth_path,
+            r#"{"claudeAiOauth":{"accessToken":"cc","refreshToken":"r","expiresAt":5}}"#,
+        )
+        .expect("write auth");
+        login(&store_path, Provider::Claude, "max", true, Some(&auth_path)).expect("login");
+        let store = load_store(&store_path).expect("load");
+        assert_eq!(store.accounts[0].provider, Provider::Claude);
+        assert_eq!(store.accounts[0].refresh, None);
+    }
+
     fn login(
         store_path: &Path,
         provider: Provider,
@@ -492,6 +612,7 @@ mod tests {
             false,
             &CompleteOAuth,
             &CompleteXaiOAuth,
+            &FakeClaudeOAuth,
         )
     }
 
@@ -599,6 +720,7 @@ mod tests {
             false,
             &RotatingOAuth,
             &CompleteXaiOAuth,
+            &FakeClaudeOAuth,
         )
         .expect("replace");
         let store = load_store(&store_path).expect("load");
@@ -615,8 +737,15 @@ mod tests {
         let temp = TempDir::new().expect("tempdir");
         let store_path = temp.path().join("accounts.json");
         login(&store_path, Provider::Codex, "amp", false, None).expect("login");
-        reauth_account(&store_path, "amp", false, &RotatingOAuth, &CompleteXaiOAuth)
-            .expect("reauth");
+        reauth_account(
+            &store_path,
+            "amp",
+            false,
+            &RotatingOAuth,
+            &CompleteXaiOAuth,
+            &FakeClaudeOAuth,
+        )
+        .expect("reauth");
         let store = load_store(&store_path).expect("load");
         assert_eq!(store.accounts.len(), 1, "reauth keeps one account");
         assert_eq!(store.accounts[0].name, "amp");
@@ -633,6 +762,7 @@ mod tests {
             false,
             &CompleteOAuth,
             &CompleteXaiOAuth,
+            &FakeClaudeOAuth,
         )
         .expect_err("missing");
         assert!(

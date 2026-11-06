@@ -1,6 +1,6 @@
 # usage ⚡
 
-See remaining **Codex** and **xAI** subscription quota — multi-account, one static print.
+See remaining **Codex**, **Claude** (Pro/Max), and **xAI** subscription quota — multi-account, one static print.
 
 No session scanning. No watch loop. Login explicitly, run `usage`, done.
 
@@ -16,7 +16,7 @@ See [installation instructions](INSTALL.md) for the no-npm/no-Git path.
 
 ## Pi extensions
 
-Install both companion extensions (account switcher first, quota bar second):
+Install the companion extensions (Codex account switcher, Codex quota bar, Claude quota bar):
 
 ```sh
 pi install git:github.com/ajay-bhargava/usage-graph
@@ -24,14 +24,18 @@ pi install git:github.com/ajay-bhargava/usage-graph
 
 This installs **only the extensions**. Install `usage` separately and ensure it is
 on Pi's `PATH`, then log in with `usage login --provider codex --name personal`.
+For the Claude bar, also run `usage login --provider claude --name max`.
 Restart Pi and run `/codex-account`. Disable any separately installed copies of
-these extensions to avoid duplicate commands and status bars.
+these extensions (for example `npm:@llblab/pi-codex-usage`) to avoid duplicate
+commands and status bars.
 
 - [pi-codex-accounts](extensions/pi-codex-accounts/README.md): pin or automatically
   select named Codex subscriptions. Unlike the standalone CLI, this opt-in extension
   intentionally copies the selected credential into Pi's auth store.
+- [pi-claude-usage](extensions/pi-claude-usage/README.md): Claude Pro/Max 5h + weekly
+  quota bar for `claude-code` / `anthropic` models, plus `/claude-usage`.
 - [pi-codex-usage](extensions/pi-codex-usage/README.md): remaining quota status bar,
-  vendored from [`@llblab/pi-codex-usage` v0.10.1](https://github.com/llblab/pi-codex-usage),
+  vendored from [`@llblab/pi-codex-usage` v0.13.2](https://github.com/llblab/pi-codex-usage),
   a fork of narumiruna's extension. Original MIT license and attribution are retained
   in its directory.
 
@@ -42,6 +46,7 @@ MIT license retained. No credentials or personal account state are bundled.
 
 ```bash
 usage login --provider codex --name work
+usage login --provider claude --name max
 usage login --provider xai --name grok
 usage
 ```
@@ -56,6 +61,12 @@ work  (codex, work@example.com, pro)
 | 5h     [############--------]  58% left, 3d 2h |
 | Weekly [##################--]  91% left, 45s   |
 +------------------------------------------------+
+
+max  (claude, me@example.com, max 20x)
++-------------------------------------------------------+
+| 5h           [###################-]  98% left, 4h 17m |
+| Weekly       [####################]  99% left, 6d 15h |
++-------------------------------------------------------+
 
 grok  (xai, SuperGrok)
 +------------------------------------------------+
@@ -73,8 +84,9 @@ UTF-8 terminals get box-drawing + `█`/`░` bars. Piped output stays ASCII.
 | `usage --json` | Same data as JSON |
 | `usage --account work` | One account only |
 | `usage login --provider codex --name work` | Codex device login |
+| `usage login --provider claude --name max` | Claude browser login (paste `code#state`) |
 | `usage login --provider xai --name grok` | xAI device login |
-| `usage login … --import --auth-file PATH` | Import Codex / Pi / Grok auth |
+| `usage login … --import --auth-file PATH` | Import Codex / Pi / Claude Code / Grok auth |
 | `usage login … --replace` | Overwrite an existing name |
 | `usage reauth work` | Repeat device login for an existing name |
 | `usage reauth work --json` | Same, with NDJSON `device_code` / `complete` events |
@@ -96,5 +108,8 @@ Never auto-imports. Never writes back to `~/.codex`, Pi, or `~/.grok`.
 ## Notes
 
 - Codex → ChatGPT `wham/usage` (incl. Spark when present)
+- Claude → `api.anthropic.com/api/oauth/usage` (5h, Weekly, per-model weekly limits)
+  - Importing `~/.claude/.credentials.json` copies only the access token (Claude refresh
+    tokens rotate). Use `usage reauth max` when it expires, or prefer native login.
 - xAI → Grok CLI proxy credits (`Weekly` / `Monthly` / `Credits`)
 - API keys are not subscription auth — they won't work here

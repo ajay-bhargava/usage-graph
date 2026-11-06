@@ -1,6 +1,35 @@
 # Changelog
 
-## Unreleased
+## 0.13.2: Empty Quota Bar Hotfix
+
+- Aligned quota bars with rounded remaining percentages: when either window rounds to `0%`, its final segment disappears and the whole dual bar uses the error background, while the other half retains its quota. The 5-hour reset countdown follows the same zero boundary; near-full quota still rounds to the nearest 5% step.
+- Release verification now tolerates up to approximately 30 minutes of npm registry processing before checking the published package identity and creating the GitHub Release.
+
+## 0.13.1: Windows Codex CLI Fallback
+
+- The Codex CLI fallback now starts on Windows. When npm installs Codex behind a `codex.cmd` shim that a shell-free `spawn` cannot launch, the extension resolves the native `codex.exe` from PATH or from the npm platform package and starts it directly, so fallback quota stays available when the primary endpoint fails. Non-Windows platforms keep plain PATH lookup, and the helper window is hidden.
+- Added Linux and Windows GitHub Actions validation for the full release check suite.
+
+## 0.13.0: OpenAI Subscription Provider Support
+
+- Added `openai` alongside `openai-codex` for `/fast`, request priority adaptation, terminal status and the optional Telegram row. Fast preferences remain isolated by provider/model, including identical model IDs. Both providers share the existing Codex subscription quota stream. Pi subscription OAuth under `openai` now fetches quota directly without requiring the legacy provider; `openai` API-key auth is skipped and the Codex CLI fallback is preserved.
+
+## 0.12.1: Telegram Fast Status
+
+- The optional Telegram status row now appends lowercase ` fast` for the active Codex model, or shows `fast` alone when quota is unavailable. It rereads the per-model preference at menu render time, so toggles, model changes and manual edits do not wait for quota refresh. Quota polling, auth, request adaptation and terminal behavior are unchanged; isolated tests cover enabled/disabled state, model/provider changes and unreadable configuration.
+
+## 0.12.0: Shared Fast Mode and Pi 1.0 Baseline
+
+- Requires Pi ≥1.0.0 across the coding-agent, AI and agent-core peers; previous hosts are outside this release's compatibility contract.
+- Added argument-free, persistent per-model `/fast` for the `openai-codex` provider with no model-ID allowlist or Fast-specific auth gate. `@llblab/pi-command-fast@^0.1.0` coordinates one command alongside Claude Usage across duplicate library copies, separate sessions and reloads; generic JSONC editing moved to that normal library. Enabled stores only `serviceTier: "priority"`; OFF removes the property.
+- Enabled Fast adds `service_tier: "priority"` to eligible Codex requests only when no tier is already present, and appends `fast` to the existing terminal status in the same dim theme color as its reset countdown, with immediate redraw and no success notification. State follows model selection and survives restart; the loading renderer tracks the newly selected model so an old timer cannot restore its previous suffix. Quota coordination and the Telegram status row are unchanged.
+- Split the monolithic entrypoint into an explicit domain DAG under `lib/`. `index.ts` only re-exports the composition root in `lib/extension.ts` and previous public contracts. The quota store, provider transport, normalized report, status lifecycle/format, Telegram adapter, and Fast override have separate owners; tests now live in `tests/` with domain-matched names.
+
+## 0.11.0: Shared Quota Refresh
+
+- Coordinated polling across Pi instances through one `~/.pi/agent/tmp/pi-codex-usage/usage.json`: the leader refreshes every 60 seconds, followers normally read every 30 seconds, and leadership becomes eligible for takeover after 90 seconds without a touch. Failure backoff is shared, the last successful report stays visible for up to an hour, and provisional full-availability confirmation runs only in the refreshing instance.
+- Made the JSON authoritative for request admission and fenced publication using the on-disk owner, claim generation, and lease. A non-waiting OS-backed SQLite mutex serializes claiming and publication; lock or claim-write failures deny requests, and late results cannot overwrite a successor. **Upgrade:** close all old Pi instances before starting updated ones; do not mix locking protocols or remove the mutex file while instances run.
+- **Breaking:** Removed Spark-specific quotas, labels, and source priority. All Codex models now use the primary `codex` quota; additional buckets and legacy per-bucket caches are ignored without migration. Dual-bar rendering, loading animation, reset countdowns, Business credit usage, Pi auth, and the Codex app-server fallback are preserved.
 
 ## 0.10.1: Softer Quota Bar
 

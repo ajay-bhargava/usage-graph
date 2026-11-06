@@ -1,0 +1,15 @@
+{
+  "name": "pi-claude-usage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Claude Pro/Max remaining-quota status bar for Pi (claude-code / anthropic models).",
+  "license": "MIT",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.80.6"
+  }
+}

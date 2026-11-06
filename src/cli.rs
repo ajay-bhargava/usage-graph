@@ -9,7 +9,7 @@ use std::path::PathBuf;
 #[command(
     name = "usage",
     version,
-    about = "Print remaining Codex and xAI subscription usage for logged-in accounts"
+    about = "Print remaining Codex, Claude, and xAI subscription usage for logged-in accounts"
 )]
 pub(crate) struct Cli {
     /// Emit structured JSON instead of tables.
@@ -72,6 +72,8 @@ pub(crate) enum Provider {
     Codex,
     /// xAI Grok subscription.
     Xai,
+    /// Claude Pro / Max subscription (Claude Code).
+    Claude,
 }
 
 impl Provider {
@@ -80,6 +82,7 @@ impl Provider {
         match self {
             Self::Codex => "codex",
             Self::Xai => "xai",
+            Self::Claude => "claude",
         }
     }
 }

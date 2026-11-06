@@ -8,8 +8,9 @@
 #![deny(clippy::missing_asserts_for_indexing)]
 #![deny(clippy::unwrap_used)]
 
-//! Static remaining-usage reports for explicitly logged-in Codex and xAI accounts.
+//! Static remaining-usage reports for explicitly logged-in Codex, Claude, and xAI accounts.
 
+mod claude;
 mod cli;
 mod login;
 mod oauth;
@@ -20,6 +21,7 @@ mod store;
 mod xai;
 
 use clap::Parser;
+use claude::{LiveClaudeOAuth, LiveClaudeUsageTransport};
 use cli::{Cli, Command};
 use eyre::{Result, WrapErr, eyre};
 use login::{login_account, reauth_account};
@@ -74,10 +76,16 @@ fn execute(cli: Cli) -> Result<()> {
             cli.json,
             &LiveCodexOAuth,
             &LiveXaiOAuth,
+            &LiveClaudeOAuth,
         ),
-        Some(Command::Reauth { name }) => {
-            reauth_account(&store_path, &name, cli.json, &LiveCodexOAuth, &LiveXaiOAuth)
-        }
+        Some(Command::Reauth { name }) => reauth_account(
+            &store_path,
+            &name,
+            cli.json,
+            &LiveCodexOAuth,
+            &LiveXaiOAuth,
+            &LiveClaudeOAuth,
+        ),
         Some(Command::List) => list_accounts(&store_path, cli.json),
         Some(Command::Logout { name }) => logout_account(&store_path, &name),
         None => print_usage_report(
@@ -87,8 +95,10 @@ fn execute(cli: Cli) -> Result<()> {
             cli.offline,
             &LiveCodexOAuth,
             &LiveXaiOAuth,
+            &LiveClaudeOAuth,
             &LiveCodexUsageTransport,
             &LiveXaiUsageTransport,
+            &LiveClaudeUsageTransport,
         ),
     }
 }
@@ -108,7 +118,7 @@ fn list_accounts(store_path: &Path, json: bool) -> Result<()> {
 
     if store.accounts.is_empty() {
         println!(
-            "No accounts. Run `usage login --provider codex --name <name>` or `--provider xai` to add one."
+            "No accounts. Run `usage login --provider codex --name <name>` or `--provider claude|xai` to add one."
         );
         return Ok(());
     }

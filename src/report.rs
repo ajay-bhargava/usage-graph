@@ -1,5 +1,9 @@
 //! Fetch and print remaining usage for stored accounts.
 
+use crate::claude::{
+    ClaudeOAuth, ClaudeUsageTransport, profile_from_payload,
+    quota_from_usage_payload as quota_from_claude_payload,
+};
 use crate::cli::Provider;
 use crate::oauth::CodexOAuth;
 use crate::quota::{
@@ -30,13 +34,15 @@ pub(crate) fn print_usage_report(
     offline: bool,
     oauth: &impl CodexOAuth,
     xai_oauth: &impl XaiOAuth,
+    claude_oauth: &impl ClaudeOAuth,
     transport: &impl CodexUsageTransport,
     xai_transport: &impl XaiUsageTransport,
+    claude_transport: &impl ClaudeUsageTransport,
 ) -> Result<()> {
     let mut store = load_store(store_path)?;
     if store.accounts.is_empty() {
         return Err(eyre!(
-            "No accounts. Run `usage login --provider codex --name <name>` or `--provider xai` to add one."
+            "No accounts. Run `usage login --provider codex --name <name>` or `--provider claude|xai` to add one."
         ));
     }
     let now_ms = unix_ms()?;
@@ -52,10 +58,14 @@ pub(crate) fn print_usage_report(
             account,
             offline,
             now_ms,
-            oauth,
-            xai_oauth,
-            transport,
-            xai_transport,
+            &Clients {
+                oauth,
+                xai_oauth,
+                claude_oauth,
+                transport,
+                xai_transport,
+                claude_transport,
+            },
         );
         if *account != before {
             store_changed = true;
@@ -84,16 +94,45 @@ pub(crate) fn print_usage_report(
     Ok(())
 }
 
+/// Provider clients used while building a report.
+struct Clients<'a, CO, XO, AO, CT, XT, AT> {
+    /// Codex OAuth.
+    oauth: &'a CO,
+    /// xAI OAuth.
+    xai_oauth: &'a XO,
+    /// Claude OAuth.
+    claude_oauth: &'a AO,
+    /// Codex usage transport.
+    transport: &'a CT,
+    /// xAI usage transport.
+    xai_transport: &'a XT,
+    /// Claude usage transport.
+    claude_transport: &'a AT,
+}
+
 /// Fetch remaining usage for one stored account.
-fn quota_for_account(
+fn quota_for_account<CO, XO, AO, CT, XT, AT>(
     account: &mut StoredAccount,
     offline: bool,
     now_ms: i64,
-    oauth: &impl CodexOAuth,
-    xai_oauth: &impl XaiOAuth,
-    transport: &impl CodexUsageTransport,
-    xai_transport: &impl XaiUsageTransport,
-) -> AccountQuota {
+    clients: &Clients<'_, CO, XO, AO, CT, XT, AT>,
+) -> AccountQuota
+where
+    CO: CodexOAuth,
+    XO: XaiOAuth,
+    AO: ClaudeOAuth,
+    CT: CodexUsageTransport,
+    XT: XaiUsageTransport,
+    AT: ClaudeUsageTransport,
+{
+    let Clients {
+        oauth,
+        xai_oauth,
+        claude_oauth,
+        transport,
+        xai_transport,
+        claude_transport,
+    } = *clients;
     if offline {
         return unavailable(account, QuotaError::Offline);
     }
@@ -110,7 +149,46 @@ fn quota_for_account(
             });
             fetch_xai_quota(account, xai_transport)
         }
+        Provider::Claude => {
+            let _ = try_refresh(account, now_ms, |refresh| {
+                claude_oauth.refresh_access_token(refresh)
+            });
+            fetch_claude_quota(account, claude_transport)
+        }
     }
+}
+
+/// Fetch Claude 5h / weekly utilization windows.
+fn fetch_claude_quota(
+    account: &StoredAccount,
+    transport: &impl ClaudeUsageTransport,
+) -> AccountQuota {
+    let profile = transport
+        .get_profile(account)
+        .ok()
+        .filter(|response| response.status == 200)
+        .map(|response| profile_from_payload(&response.body))
+        .unwrap_or_default();
+    let mut quota = match transport.get_usage(account) {
+        Ok(response) => {
+            if let Some(error) = quota_error_from_status(response.status) {
+                unavailable(account, error)
+            } else {
+                match quota_from_claude_payload(&response.body) {
+                    Ok(windows) => available(account, profile.plan.clone(), windows),
+                    Err(error) => unavailable(account, error),
+                }
+            }
+        }
+        Err(_) => unavailable(account, QuotaError::RequestFailed),
+    };
+    if quota.login.is_none() {
+        quota.login = profile.email;
+    }
+    if quota.plan.is_none() {
+        quota.plan = profile.plan;
+    }
+    quota
 }
 
 /// Fetch Codex remaining-usage windows.
@@ -217,6 +295,7 @@ fn unix_ms() -> Result<i64> {
 #[cfg(test)]
 mod tests {
     use super::print_usage_report;
+    use crate::claude::{ClaudeAuthSession, ClaudeOAuth, ClaudeUsageTransport};
     use crate::cli::Provider;
     use crate::oauth::{CodexOAuth, DeviceAuthSession, DevicePoll, OAuthTokenSet};
     use crate::quota::{CodexUsageTransport, UsageHttpResponse};
@@ -296,6 +375,86 @@ mod tests {
         }
     }
 
+    struct NoClaudeOAuth;
+
+    impl ClaudeOAuth for NoClaudeOAuth {
+        fn start_auth(&self) -> Result<ClaudeAuthSession> {
+            Err(eyre!("unused"))
+        }
+        fn exchange_code(&self, _s: &ClaudeAuthSession, _p: &str) -> Result<OAuthTokenSet> {
+            Err(eyre!("unused"))
+        }
+        fn refresh_access_token(&self, _refresh_token: &str) -> Result<OAuthTokenSet> {
+            Err(eyre!("unused"))
+        }
+    }
+
+    struct FixtureClaudeTransport {
+        /// Usage body.
+        usage: String,
+    }
+
+    impl ClaudeUsageTransport for FixtureClaudeTransport {
+        fn get_usage(&self, _account: &StoredAccount) -> Result<UsageHttpResponse> {
+            Ok(UsageHttpResponse {
+                status: 200,
+                body: self.usage.clone(),
+            })
+        }
+        fn get_profile(&self, _account: &StoredAccount) -> Result<UsageHttpResponse> {
+            Ok(UsageHttpResponse {
+                status: 200,
+                body: r#"{"account":{"email":"me@x.co"},"organization":{"organization_type":"claude_pro"}}"#
+                    .to_string(),
+            })
+        }
+    }
+
+    fn empty_claude() -> FixtureClaudeTransport {
+        FixtureClaudeTransport {
+            usage: String::new(),
+        }
+    }
+
+    #[test]
+    fn json_report_includes_claude_windows() {
+        let temp = TempDir::new().expect("tempdir");
+        let path = temp.path().join("accounts.json");
+        save_store(
+            &path,
+            &AccountStore {
+                accounts: vec![StoredAccount {
+                    name: "max".to_string(),
+                    provider: Provider::Claude,
+                    account_id: None,
+                    access: "access".to_string(),
+                    refresh: None,
+                    expires: None,
+                }],
+            },
+        )
+        .expect("save");
+        print_usage_report(
+            &path,
+            None,
+            true,
+            false,
+            &NoOAuth,
+            &NoXaiOAuth,
+            &NoClaudeOAuth,
+            &FixtureTransport {
+                body: String::new(),
+            },
+            &empty_xai(),
+            &FixtureClaudeTransport {
+                usage:
+                    r#"{"five_hour":{"utilization":20,"resets_at":"2026-11-02T05:59:59+00:00"}}"#
+                        .to_string(),
+            },
+        )
+        .expect("claude json report");
+    }
+
     fn empty_xai() -> FixtureXaiTransport {
         FixtureXaiTransport {
             billing: String::new(),
@@ -332,10 +491,12 @@ mod tests {
             false,
             &NoOAuth,
             &NoXaiOAuth,
+            &NoClaudeOAuth,
             &FixtureTransport {
                 body: String::new(),
             },
             &empty_xai(),
+            &empty_claude(),
         )
         .expect_err("empty");
         assert!(error.to_string().contains("No accounts"), "{error}");
@@ -352,10 +513,12 @@ mod tests {
             true,
             &NoOAuth,
             &NoXaiOAuth,
+            &NoClaudeOAuth,
             &FixtureTransport {
                 body: String::new(),
             },
             &empty_xai(),
+            &empty_claude(),
         )
         .expect("offline report");
     }
@@ -371,11 +534,13 @@ mod tests {
             false,
             &NoOAuth,
             &NoXaiOAuth,
+            &NoClaudeOAuth,
             &FixtureTransport {
                 body: r#"{"rate_limit":{"primary_window":{"used_percent":10,"limit_window_seconds":18000}}}"#
                     .to_string(),
             },
             &empty_xai(),
+            &empty_claude(),
         )
         .expect("json report");
     }
@@ -405,6 +570,7 @@ mod tests {
             false,
             &NoOAuth,
             &NoXaiOAuth,
+            &NoClaudeOAuth,
             &FixtureTransport {
                 body: String::new(),
             },
@@ -412,6 +578,7 @@ mod tests {
                 billing: r#"{"config":{"creditUsagePercent":10,"currentPeriod":{"start":"2026-08-20T00:00:00Z","end":"2026-08-27T00:00:00Z"}}}"#.to_string(),
                 settings: r#"{"subscription_tier_display":"SuperGrok"}"#.to_string(),
             },
+            &empty_claude(),
         )
         .expect("xai json report");
     }
